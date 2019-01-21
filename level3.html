@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<html>
+  <head>
+    <title>Level 3</title>
+    <script src="http://d3js.org/d3.v5.js"></script>
+    <script src="http://d3js.org/colorbrewer.v1.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0,user-scalable=no">
+    <style>
+    div{display:inline}
+    </style>
+  </head>
+  <body>
+    <div id = "chart_nl"></div>
+    <div id = "chart_m"></div>
+
+    <script type = "text/javascript">
+    var margin = {top: 100, right: 125, bottom: 150, left: 125},
+        total_width = 950,
+        total_height = 950,
+        width = total_width - margin.left - margin.right,
+        height = total_height - margin.top - margin.bottom,
+        grid_size = 10,
+        r = {min: 10, max: 20},
+        legend_size = {width: 20, height:40};
+        
+
+    var collabrator_max, collabrator_min, collabration_max, collabration_min;
+
+    var grids, grids_0, nodes, edges, name_scale_x, name_scale_y, r_scale;
+
+    //Preprocess data
+    d3.json("HKUST_coauthor_graph.json")
+    .then(function(data){
+        //Filter all CSE nodes and links
+
+        //Filter all nodes of CSE Profs
+        var filtered_nodes = data.nodes.filter(function(d){ return d.dept == "CSE"});
+
+        //Filter all edges with target and source is CSE Profs
+        var cse_id = [];
+
+        for (var i = 0; i < filtered_nodes.length; i++){
+            cse_id.push(filtered_nodes[i].id);
+        }
+
+        filtered_edges = data.edges.filter(function(d){ return cse_id.includes(d.source) && cse_id.includes(d.target); })
+
+        //Remove all CSE Profs without edges
+        var cse_sources = [];
+        var cse_targets = [];
+
+        for (var i = 0; i < filtered_edges.length; i++){
+            cse_sources.push(filtered_edges[i].source);
+            cse_targets.push(filtered_edges[i].target);
+        }
+
+        filtered_nodes = filtered_nodes.filter(function(d){
+            return cse_sources.includes(d.id) || cse_targets.includes(d.id); });
+    
+        filter_edges_reverse = filtered_edges.map(function(d){
+            return {
+                target: d.source,
+                source: d.target,
+                publications: d.publications
+            }
+        })
+        return {
+            nodes: filtered_nodes,
+            edges: filtered_edges,
+            reverse_edges: filter_edges_reverse
+        };
+    })
+    .then(function(data){
+        //Compute collabrators for node-link
+        data.collabrator = d3.nest()
+            .key(function(d) { return d.source; })
+            .rollup(function(d) { return d3.sum(d, function(v){ return 1; })})
+            .entries(data.edges.concat(data.reverse_edges));
+
+        //Compute collabrations for matrix
+        data.collabration = d3.nest()
+            .key(function(d){ return d.source; })
+            .key(function(d){ return d.target; })
+            .rollup(function(d){ 
+                if (d[0].publications == undefined)
+                    return 0;
+                else
+                    return d[0].publications.length; })
+            .entries(data.edges);
+
+        //Find max and min collabrator
+        collabrator_max = d3.max(data.collabrator, function(d){ return d.value; });
+        collabrator_min = d3.min(data.collabrator, function(d){ return d.value; });
+
+        //Find max and min collabration
+        collabration_max = d3.max(data.collabration, function(d){ return d3.max(d.values, function(v){ return v.value; }); });
+        collabration_min = d3.min(data.collabration, function(d){ return d3.min(d.values, function(v){ return v.value; }); });
+        
+        return {
+            nodes: data.nodes,
+            edges: data.edges,
+            collabration: data.collabration,
+            collabrator: data.collabrator,
+            reverse_edges: data.reverse_edges
+        };
+    }).then(function(data){
+        //Draw node-link
+        //Build scale
+        var colors_nl = colorbrewer.PuBu[6];
+        var color_scale_nl = d3.scaleQuantile()
+            .domain([collabrator_min, collabrator_max])
+            .range(colors_nl);
+        r_scale = d3.scaleLinear()
+            .domain([collabrator_min, collabrator_max])
+            .range([r.min, r.max]);
+
+        var svg_nl = d3.select("#chart_nl").append("svg")
+            .attr("width", total_width)
+            .attr("height", total_height)
+            .append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        //Tips
+        var tooltip_nl = d3.select("#chart_nl")
+            .append("div")
+            .style("position", "absolute")
+            .style("z-index", "10")
+            .style("visibility", "hidden")
+            .style("background", "snow")
+            .style("font-size", "13px")
+            .text("a simple tooltip");
+
+        //Build edges
+        edges = svg_nl.append("g")
+            .selectAll("edge")
+            .data(data.edges)
+            .enter()
+            .append("line")
+            .attr("stroke", "gray")
+            .attr("stroke-opacity", 0.4);
+
+        //Build nodes
+        nodes = svg_nl.append("g")
+            .selectAll("node")
+            .data(data.nodes)
+            .enter()
+            .append("circle")
+            .attr("r", function(d){ 
+                return r_scale(data.collabrator.filter(function(v){ return d.id == v.key; })[0].value);
+                })
+            .attr("fill", function(d){ 
+                return color_scale_nl(data.collabrator.filter(function(v){ return d.id == v.key; })[0].value); })
+            .on("mouseover", function(d){
+                tooltip_nl.text(d.fullname.length == 0 ? d.itsc : d.fullname)
+                    .style("visibility", "visible");
+
+                grids.style("stroke", function(v){
+                        if (d.id == v.source || d.id == v.target)
+                            return "blue";
+                        else
+                            return "transparent";
+                    });
+
+                grids_0.style("stroke", function(v){
+                        if ((Math.round(v.x) == Math.round(name_scale_x(d.id)- grid_size / 2 + 50) || Math.round(v.y) == Math.round(name_scale_y(d.id)- grid_size / 2)) )
+                            return "lightblue";
+                        else
+                            return "transparent";
+                    });
+            })
+            .on("mousemove", function(){ 
+                tooltip_nl.style("top", (d3.event.pageY - 10) + "px")
+                    .style("left",(d3.event.pageX + 10) + "px"); 
+            })
+            .on("mouseout", function(d){
+                tooltip_nl.style("visibility", "hidden");
+                grids.style("stroke", "transparent");
+                grids_0.style("stroke", "transparent");
+            });
+
+        //Build simulation
+        var simulation = d3.forceSimulation(data.nodes)
+            .force("edge", d3.forceLink(data.edges).id(function(d){ return d.id; }))
+            .force("charge", d3.forceManyBody().strength(-400).distanceMin(200).distanceMax(600))
+            .force("center", d3.forceCenter(width / 2, height / 3 + margin.top));
+
+        simulation.on("tick", function(){
+                edges
+                .attr("x1", function(d){ return d.source.x; })
+                .attr("y1", function(d){ return d.source.y; })
+                .attr("x2", function(d){ return d.target.x; })
+                .attr("y2", function(d){ return d.target.y; });
+                nodes
+                .attr("cx", function(d){ return d.x; })
+                .attr("cy", function(d){ return d.y; });
+                });
+
+        return data;
+    }).then(function(data){
+        //Draw matrix
+        //Build scale
+        var id_list = data.nodes.map(function(d){ return d.id; })
+        name_scale_x = d3.scalePoint().domain(id_list).range([grid_size, width - 200]);
+        name_scale_y = d3.scalePoint().domain(id_list).range([grid_size,height - 200]);
+        
+        var colors_m = colorbrewer.YlOrRd[6];
+        var color_scale_m = d3.scaleQuantile()
+            .domain([Math.log1p(collabration_min), Math.log1p(collabration_max)])
+            .range(colors_m);
+
+        var svg_m = d3.select("#chart_m").append("svg")
+            .attr("width", total_width)
+            .attr("height", total_height)
+            .append("g")
+            .attr("transform", "translate(" + margin.left + "," + 3 * margin.top + ")");
+
+        //Tips
+        var tooltip_m = d3.select("#chart_m")
+            .append("div")
+            .style("position", "absolute")
+            .style("z-index", "10")
+            .style("visibility", "hidden")
+            .style("background", "snow")
+            .style("font-size", "13px")
+            .text("a simple tooltip");
+
+        //Draw background grey grids
+        var all_position = [];
+        for (var i = 0; i < id_list.length; i++){
+            for (var j = 0; j < id_list.length; j++){
+                all_position.push({
+                    x:name_scale_x(id_list[i]) - grid_size / 2 + 50,
+                    y:name_scale_y(id_list[j]) - grid_size / 2
+                });
+            }
+        }
+        
+        grids_0 = svg_m.append("g")
+            .selectAll("grids")
+            .data(all_position)
+            .enter()
+            .append('rect')
+            .attr("x", function(d){ return d.x; })
+            .attr("y", function(d){ return d.y; })
+            .attr("width", grid_size)
+            .attr("height", grid_size)
+            .style("fill", "#F5F5F5")
+            .attr("z-index", "1");
+        
+        //Draw grids of collabrations
+        grids = svg_m.append("g")
+            .selectAll("grids")
+            .data(data.edges.map(function(d){ return {
+                source: d.source.id,
+                target: d.target.id,
+                publications: d.publications}; }).concat(data.reverse_edges))
+            .enter()
+            .append('rect')
+            .attr("x", function(d){ return name_scale_x(d.source) - grid_size / 2 + 50; })
+            .attr("y", function(d){ return name_scale_y(d.target) - grid_size / 2; })
+            .attr("width", grid_size)
+            .attr("height", grid_size)
+            .style("fill", function(d){ return color_scale_m(Math.log1p(d.publications.length)); })
+            .attr("z-index", "8")
+            .on("mouseover", function(d){
+                tooltip_m.text("Collabration: " + d.publications.length)
+                    .style("visibility", "visible");
+
+                edges.style("stroke-width", function(v){
+                    if ((d.source == v.source.id && d.target == v.target.id) || (d.target == v.source.id && d.source == v.target.id))
+                        return "10px"; 
+                });
+                    
+                nodes.style("stroke", function(v){
+                    if (d.source == v.id || d.target == v.id)
+                        return "gray"; })
+                    .style("stroke-width", "2px")
+                    .attr("r", function(v){
+                    if (d.source == v.id || d.target == v.id)
+                        return 20; 
+                    else
+                        return 10; 
+                    });
+            })
+            .on("mousemove", function(){ 
+                tooltip_m.style("top", (d3.event.pageY - 10) + "px")
+                    .style("left",(d3.event.pageX + 10) + "px"); 
+            })
+            .on("mouseout", function(d){
+                tooltip_m.style("visibility", "hidden");
+                edges.style("stroke-width", "1px");
+                nodes.style("stroke", "transparent")
+                .attr("r", function(d){ 
+                return r_scale(data.collabrator.filter(function(v){ return d.id == v.key; })[0].value);
+                }); 
+            });
+
+        var grids_text_top = svg_m.append("g")
+            .selectAll("text")
+            .data(data.nodes)
+            .enter()
+            .append("text")
+            .attr("class", "mono")
+            .text(function(d){ 
+                if (d.fullname.length != 0)
+                    return d.fullname;
+                else
+                    return d.itsc; })
+            .attr("x", 0)
+            .attr("y", function(d, i){ return name_scale_y(d.id) + grid_size / 2 + 50; })
+            .style("font-size", "13px")
+            .attr("transform", "rotate(-90)");
+        
+        var grids_text_left = svg_m.append("g")
+            .selectAll("text")
+            .data(data.nodes)
+            .enter()
+            .append("text")
+            .attr("class", "mono")
+            .text(function(d){ 
+                if (d.fullname.length != 0)
+                    return d.fullname;
+                else
+                    return d.itsc; })
+            .attr("x", 50)
+            .attr("y", function(d, i){ return name_scale_y(d.id) + grid_size / 2; })
+            .style("text-anchor", "end")
+            .style("font-size", "13px")
+        
+        // console.log(color_scale.quantiles())
+        // console.log(data.edges)
+        var legend = svg_m.append("g").selectAll(".legend")
+            .data([0].concat(color_scale_m.quantiles()))
+            .enter()
+            .append("rect")
+            .attr("x", width - 100)
+            .attr("y", function(d, i){ return i * legend_size.height; })
+            .attr("width", legend_size.width)
+            .attr("height", legend_size.height)
+            .style("fill", function(d, i){ return colors_m[i]; });
+
+        var legend_text = svg_m.append("g").selectAll(".legend_text")
+            .data([0].concat(color_scale_m.quantiles()).concat([Math.log1p(collabration_max)]))
+            .enter().append("text")
+            .attr("class", "mono")
+            .text(function(d){ return Math.round(Math.expm1(d)).toString(); })
+            .attr("x", width - 95 + legend_size.width)
+            .attr("y", function(d, i){ return i * legend_size.height + 5; })
+            .style("fill", "black");
+
+    })
+
+    </script>
+
+  </body>
+
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<html>
+  <head>
+    <title>Level 1</title>
+    <script src="http://d3js.org/d3.v5.js"></script>
+    <script src="http://d3js.org/colorbrewer.v1.min.js"></script>
+  </head>
+
+  <body>
+    <div id="chart"></div>
+    <button id="switchBtn" onclick = "Switch_max_min()" >Switch to Min Temperature</button>
+
+    <script type = "text/javascript">
+
+        // For switching function
+        // 0: show min, 1: show max
+        var current_state = 1;
+
+        var margin = {top:50, right:0, bottom: 100, left: 100},
+        total_width = 960,
+        total_height = 600, 
+        width = total_width - margin.left - margin.right,
+        height = total_height - margin.top - margin.bottom,
+        grid_size = 30,
+        legend_size = {width: 50, height: 20},
+        years,
+        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+        colors = colorbrewer.RdYlBu[9].reverse();
+
+        var color_scale, grids;
+
+        
+        var month_max_min = [];   
+        var time_parse = d3.timeParse("%Y-%m-%d");
+        var format_year = d3.timeFormat("%Y");
+        var format_month = d3.timeFormat("%m");
+
+        d3.csv("temperature_daily.csv", function(d){
+            return {
+                year: +format_year(time_parse(d.date)),
+                month: months[parseInt(format_month(time_parse(d.date))) - 1],
+                max_temp: +d.max_temperature,
+                min_temp: +d.min_temperature
+            };
+        }).then(function(data) {
+            //Preprocess dataset
+            var year_range = d3.extent(data, function(d){ return d.year });
+
+            years = Array.apply(null, {length: year_range[1] - year_range[0] + 1}).map(function(d, i){ return i + year_range[0]; });
+
+            for (var i = 0; i < years.length; i++){
+                for (var j = 0; j < months.length; j++){
+                    var temp_data = data.filter(function(d){ return d.month == months[j] && d.year == i + year_range[0]; });
+
+                    month_max_min.push({
+                        year: i + year_range[0], 
+                        month: months[j],
+                        avg_max: d3.mean(temp_data, function(d){ return d.max_temp; }),
+                        avg_min: d3.mean(temp_data, function(d){ return d.min_temp; })
+                        });
+                }
+            }
+
+        }).then(function(){
+
+            var svg = d3.select("#chart").append("svg")
+                .attr("width", total_width)
+                .attr("height", total_height)
+                .append("g")
+                .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+            //Implement scales
+            var x_scale = d3.scalePoint()
+                .domain(years)
+                .range([grid_size, width - grid_size]);
+            var y_scale = d3.scalePoint()
+                .domain(months)
+                .range([grid_size, height - grid_size]);
+            //Need to be global for switching
+            color_scale = d3.scaleQuantile()
+                .domain([d3.max(month_max_min, function(d){ return d.avg_max; }), 
+                        d3.min(month_max_min, function(d){ return d.avg_min; })])
+                .range(colors);
+
+            //Build tips
+            var tooltip = d3.select("#chart")
+                .append("div")
+                .style("position", "absolute")
+                .style("z-index", "10")
+                .style("visibility", "hidden")
+                .style("background", "white")
+                .text("a simple tooltip");
+
+            //Build axis
+            var x_axis = d3.axisTop(x_scale).ticks(21);
+            var y_axis = d3.axisLeft(y_scale).ticks(12);
+
+            svg.append("g").call(x_axis);
+            svg.append("g").call(y_axis);
+                                        
+            //Build grids
+            //Need to be global for switching
+            grids = svg.append("g").selectAll("grid")
+                .data(month_max_min)
+                .enter().append("rect")
+                .attr("x", function(d){ return (x_scale(d.year) - grid_size / 2); })
+                .attr("y", function(d){ return (y_scale(d.month) - grid_size / 2); })
+                .attr("width", grid_size)
+                .attr("height", grid_size)
+                .style("fill", "white")
+                .style("fill", function(d){ if (d.avg_max > 0) 
+                                                return color_scale(d.avg_max);
+                                            else
+                                                return "transparent"})
+                .on("mouseover", function(d){ tooltip.text("Date: " + d.month + " " + d.year + ", Max: " + Math.round(d.avg_max) + ", Min: " + Math.round(d.avg_min)); 
+                                              return tooltip.style("visibility", "visible"); })
+                .on("mousemove", function(){ return tooltip.style("top", (d3.event.pageY - 10) + "px").style("left",(d3.event.pageX + 10) + "px"); })
+                .on("mouseout", function(){ return tooltip.style("visibility", "hidden"); });
+
+            
+            //Build legend
+            var legend = svg.append("g").selectAll(".legend")
+                .data([0].concat(color_scale.quantiles()))
+                .enter()
+                .append("rect")
+                .attr("x", function(d, i){ return i * legend_size.width})
+                .attr("y", height)
+                .attr("width", legend_size.width)
+                .attr("height", legend_size.height)
+                .style("fill", function(d, i){ return colors[i];});
+
+            var legend_text = svg.append("g").selectAll(".legend_text")
+                .data([0].concat(color_scale.quantiles()).concat([d3.max(month_max_min, function(d){ return d.avg_max; })]))
+                .enter().append("text")
+                .attr("class", "mono")
+                .text(function(d){ return Math.round(d).toString(); })
+                .attr("x", function(d, i){ return i * legend_size.width - 5})
+                .attr("y", height + 2 * legend_size.height)
+                .style("fill", "black");
+
+                            
+        })
+
+        function Switch_max_min(){
+            if (current_state == 1){
+                grids.transition().style("fill", function(d){ if (d.avg_min > 0) 
+                                                                return color_scale(d.avg_min);
+                                                            else
+                                                                return "transparent"});
+                current_state = 0;    
+                switchBtn.innerHTML = "Switch to Max Temperature";
+            }
+            else{ 
+                grids.transition().style("fill", function(d){ if (d.avg_max > 0) 
+                                                                return color_scale(d.avg_max);
+                                                            else
+                                                                return "transparent"});    
+                current_state = 1;
+                switchBtn.innerHTML = "Switch to Min Temperature";
+            }    
+        }
+    </script>
+
+
+  </body>
+</html>
