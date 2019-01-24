@@ -3,10 +3,18 @@
 Welcome to the coding challenge of VisLab! We have set a couple of challenges for you:
 
 ## Level 1 & 2 (Basic): [Link](./level1.md)
+
+[Level 1 Page](http://hlibg.student.ust.hk/d3/level1.html)
+
+[Level 2 Page](http://hlibg.student.ust.hk/d3/level2.html)
+
 HK Temperature Heatmap
 ![level1](./level1.png)
 
 ## Level 3 (Intermediate): [Link](./level3.md)
+
+[Level 3 Page](http://hlibg.student.ust.hk/d3/level3.html)
+
 HKUST Co-author Graph
 ![level3](./level3.png)
 
